@@ -7,6 +7,9 @@ the state published by mobile.
 
 LiveSplit configurations compatible. Ready for `.lss` and `.ls1l` files.
 
+
+![img.png](.github/assets/img.png)
+
 ## Modules
 
 - `shared/models`: common wire and timer models.
