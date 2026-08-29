@@ -12,6 +12,8 @@ struct ChronoSplitApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         model.syncRelay()
+                    } else {
+                        model.flushPersistence()
                     }
                 }
         }

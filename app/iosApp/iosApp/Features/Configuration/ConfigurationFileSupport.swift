@@ -26,19 +26,39 @@ func optionalText(_ binding: Binding<String?>) -> Binding<String> {
     )
 }
 
-func optionalInteger(_ binding: Binding<Int?>) -> Binding<String> {
-    Binding(
-        get: { binding.wrappedValue.map(String.init) ?? "" },
-        set: { binding.wrappedValue = Int($0) }
-    )
-}
-
 func parseMilliseconds(_ value: String) -> Int64? {
-    let parts = value.split(separator: ":")
-    guard let seconds = Double(parts.last ?? "") else { return nil }
-    let minutes = parts.count > 1 ? Int64(parts[parts.count - 2]) ?? 0 : 0
-    let hours = parts.count > 2 ? Int64(parts[parts.count - 3]) ?? 0 : 0
-    return Int64(Double(hours * 3_600 + minutes * 60) * 1_000 + seconds * 1_000)
+    let normalized = value.replacingOccurrences(of: ",", with: ".")
+    let parts = normalized.split(separator: ":", omittingEmptySubsequences: false)
+    guard (1...3).contains(parts.count),
+          parts.allSatisfy({ !$0.isEmpty }),
+          let seconds = Double(parts[parts.count - 1]),
+          seconds.isFinite,
+          seconds >= 0,
+          (parts.count == 1 || seconds < 60)
+    else { return nil }
+
+    let minutes: Int64
+    if parts.count > 1 {
+        guard let parsedMinutes = Int64(parts[parts.count - 2]),
+              parsedMinutes >= 0,
+              (parts.count == 2 || parsedMinutes < 60)
+        else { return nil }
+        minutes = parsedMinutes
+    } else {
+        minutes = 0
+    }
+
+    let hours: Int64
+    if parts.count > 2 {
+        guard let parsedHours = Int64(parts[0]), parsedHours >= 0 else { return nil }
+        hours = parsedHours
+    } else {
+        hours = 0
+    }
+
+    let milliseconds = Double(hours * 3_600 + minutes * 60) * 1_000 + seconds * 1_000
+    guard milliseconds <= Double(Int64.max) else { return nil }
+    return Int64(milliseconds.rounded())
 }
 
 func formatMilliseconds(_ value: Int64) -> String {

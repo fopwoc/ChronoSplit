@@ -8,12 +8,13 @@ struct LayoutSettingsScreen: View {
     @State private var isExporting = false
     @State private var isPreviewActive = false
     @State private var hasLoadedDraft = false
+    @State private var isSaving = false
 
     var body: some View {
         Form {
             Section("Preview") {
                 SharedRunBoard(session: model.session, onSegmentClick: nil)
-                    .frame(height: 300)
+                    .frame(height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
@@ -79,11 +80,16 @@ struct LayoutSettingsScreen: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
-                    if model.saveLayoutDraft() {
-                        model.endRunBoardPreview()
-                        dismiss()
+                    isSaving = true
+                    model.saveLayoutDraft { success in
+                        isSaving = false
+                        if success {
+                            model.endRunBoardPreview()
+                            dismiss()
+                        }
                     }
                 }
+                .disabled(isSaving)
             }
         }
         .alert("Could not save layout", isPresented: saveErrorBinding) {
@@ -127,7 +133,8 @@ private struct LayoutComponentsScreen: View {
                 Toggle("Column labels", isOn: $model.configuration.layoutDraft.showColumnLabels)
                 TextField(
                     "Visible split count (automatic when empty)",
-                    text: optionalInteger($model.configuration.layoutDraft.visualSplitCount)
+                    value: $model.configuration.layoutDraft.visualSplitCount,
+                    format: .number
                 )
                 .keyboardType(.numberPad)
                 Stepper(
@@ -139,6 +146,9 @@ private struct LayoutComponentsScreen: View {
         }
         .navigationTitle("Title and splits")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { model.previewLayoutDraft() }
+        .onChange(of: model.configuration.layoutDraft) { _, _ in model.previewLayoutDraft() }
+        .onDisappear { model.endRunBoardPreview() }
     }
 }
 
@@ -165,6 +175,9 @@ private struct LayoutTimerScreen: View {
         }
         .navigationTitle("Timer display")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { model.previewLayoutDraft() }
+        .onChange(of: model.configuration.layoutDraft) { _, _ in model.previewLayoutDraft() }
+        .onDisappear { model.endRunBoardPreview() }
     }
 }
 

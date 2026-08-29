@@ -48,6 +48,17 @@ fun RunConfigurationDraft.toRunDefinition(
 ): RunDefinition {
     require(title.isNotBlank()) { "Run title must not be blank" }
     require(segments.isNotEmpty()) { "A run requires at least one segment" }
+    require(segments.all { it.name.isNotBlank() }) { "Segment names must not be blank" }
+    require(segments.map { it.id }.filter(String::isNotBlank).distinct().size == segments.count { it.id.isNotBlank() }) {
+        "Segment identifiers must be unique"
+    }
+    require(segments.all { (it.splitTimeMilliseconds ?: 0) >= 0 && (it.bestSegmentMilliseconds ?: 0) >= 0 }) {
+        "Split and best-segment times must not be negative"
+    }
+    val splitTimes = segments.mapNotNull { it.splitTimeMilliseconds }
+    require(splitTimes.zipWithNext().all { (previous, next) -> next >= previous }) {
+        "Split times must not decrease"
+    }
     return RunDefinition(
         id = id?.takeIf(String::isNotBlank) ?: configurationIdForTitle(title),
         title = title.trim(),

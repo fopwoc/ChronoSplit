@@ -39,6 +39,7 @@ class IosMobileSession(databasePath: String) {
     private val mobileSessionId = Random.nextLong().toString(16)
     private var publisher: StatePublisher? = null
     private var attemptDetailsObserver: ((List<AttemptDetail>) -> Unit)? = null
+    private var persistenceErrorObserver: ((String?) -> Unit)? = null
 
     init {
         scope.launch {
@@ -52,6 +53,11 @@ class IosMobileSession(databasePath: String) {
                 attemptDetailsObserver?.invoke(details)
             }
         }
+        scope.launch {
+            session.persistenceError.collectLatest { error ->
+                persistenceErrorObserver?.invoke(error)
+            }
+        }
     }
 
     private var latestAttemptDetails: List<AttemptDetail> = emptyList()
@@ -59,6 +65,17 @@ class IosMobileSession(databasePath: String) {
     fun observeAttemptDetails(observer: (List<AttemptDetail>) -> Unit) {
         attemptDetailsObserver = observer
         observer(latestAttemptDetails)
+    }
+
+    fun observePersistenceError(observer: (String?) -> Unit) {
+        persistenceErrorObserver = observer
+        observer(session.persistenceError.value)
+    }
+
+    fun clearPersistenceError() = session.clearPersistenceError()
+
+    fun flushPersistence(completion: (String?) -> Unit) {
+        scope.launch { completion(session.awaitPendingPersistence()) }
     }
 
     fun currentConfigurationSummaries(): List<ConfigurationSummary> =
@@ -89,31 +106,54 @@ class IosMobileSession(databasePath: String) {
 
     fun selectConfiguration(id: String): Boolean = runBoardViewModel.selectConfiguration(id)
 
-    fun importLayout(layoutJson: String): Boolean = runCatching {
-        runBoardViewModel.importLayout(parseLs1lLayout(layoutJson))
-        true
-    }.getOrDefault(false)
-
-    fun importRun(runXml: String): Boolean = runCatching {
-        runBoardViewModel.importRun(parseLssDocument(runXml))
-        true
-    }.getOrDefault(false)
+    fun importRun(runXml: String, completion: (String?) -> Unit) {
+        session.clearPersistenceError()
+        val update = runCatching { runBoardViewModel.importRun(parseLssDocument(runXml)) }
+        val immediateFailure = update.exceptionOrNull()
+        if (immediateFailure != null) {
+            completion(immediateFailure.message ?: "Could not import the run.")
+            return
+        }
+        scope.launch { completion(session.awaitPendingPersistence()) }
+    }
 
     fun currentConfigurationDraftJson(): String =
         runBoardViewModel.currentConfiguration().toConfigurationDraftJson()
 
-    fun saveConfigurationDraftJson(content: String, createNew: Boolean): Boolean = runCatching {
-        val draft = parseConfigurationDraftJson(content)
-        val current = runBoardViewModel.currentConfiguration()
-        val definition = draft.toRunDefinition(
-            layout = if (createNew) current.layout else {
-                runBoardViewModel.configuration(draft.id.orEmpty())?.layout ?: current.layout
-            },
-        )
-        if (createNew) runBoardViewModel.createConfiguration(definition)
-        else runBoardViewModel.configure(definition, preserveGoldSplits = false)
-        true
-    }.getOrDefault(false)
+    fun configurationDraftJson(id: String): String? =
+        runBoardViewModel.configuration(id)?.toConfigurationDraftJson()
+
+    fun saveConfigurationDraftJson(
+        content: String,
+        createNew: Boolean,
+        completion: (String?) -> Unit,
+    ) {
+        session.clearPersistenceError()
+        val update = runCatching {
+            val draft = parseConfigurationDraftJson(content)
+            val current = runBoardViewModel.currentConfiguration()
+            val definition = draft.toRunDefinition(
+                layout = if (createNew) current.layout else {
+                    runBoardViewModel.configuration(draft.id.orEmpty())?.layout ?: current.layout
+                },
+            )
+            if (createNew) {
+                runBoardViewModel.createConfiguration(definition)
+            } else {
+                check(runBoardViewModel.updateConfiguration(definition, preserveGoldSplits = false)) {
+                    "The run configuration no longer exists."
+                }
+            }
+        }
+        val immediateFailure = update.exceptionOrNull()
+        if (immediateFailure != null) {
+            completion(immediateFailure.message ?: "Could not save the run configuration.")
+            return
+        }
+        scope.launch {
+            completion(session.awaitPendingPersistence())
+        }
+    }
 
     fun copyConfiguration(id: String): Boolean = runBoardViewModel.copyConfiguration(id) != null
 
@@ -122,11 +162,25 @@ class IosMobileSession(databasePath: String) {
     fun currentLayoutDraftJson(): String =
         runBoardViewModel.currentConfiguration().layout.toEditorDraftJson()
 
-    fun saveLayoutDraftJson(content: String): Boolean = runCatching {
-        val current = runBoardViewModel.currentConfiguration()
-        runBoardViewModel.importLayout(current.layout.withEditorDraft(parseLayoutEditorDraftJson(content)))
-        true
-    }.getOrDefault(false)
+    fun saveLayoutDraftJson(content: String, completion: (String?) -> Unit) {
+        session.clearPersistenceError()
+        val update = runCatching {
+            val current = runBoardViewModel.currentConfiguration()
+            runBoardViewModel.importLayout(current.layout.withEditorDraft(parseLayoutEditorDraftJson(content)))
+        }
+        val immediateFailure = update.exceptionOrNull()
+        if (immediateFailure != null) {
+            completion(immediateFailure.message ?: "Could not save the layout.")
+            return
+        }
+        scope.launch {
+            completion(session.awaitPendingPersistence())
+        }
+    }
+
+    fun importedLayoutDraftJson(content: String): String? = runCatching {
+        parseLs1lLayout(content).toEditorDraftJson()
+    }.getOrNull()
 
     fun previewLayoutDraftJson(content: String): Boolean = runCatching {
         val current = runBoardViewModel.currentConfiguration()

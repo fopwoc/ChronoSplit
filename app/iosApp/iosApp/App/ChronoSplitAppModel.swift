@@ -1,6 +1,7 @@
 import ChronoSplitIosApp
 import Foundation
 import Observation
+import UIKit
 
 @Observable
 final class ChronoSplitAppModel {
@@ -49,11 +50,15 @@ final class ChronoSplitAppModel {
             pauseActionTitle: pauseActionTitle,
             isRunning: createdSession.isRunning(),
             isPaused: pauseActionTitle == "Resume",
-            hasConfigurations: createdSession.hasConfigurations()
+            hasConfigurations: createdSession.hasConfigurations(),
+            persistenceError: nil
         )
         relay = Self.loadRelayState(isPreview: isPreview)
         createdSession.observeAttemptDetails { [weak self] details in
             self?.history.details = details
+        }
+        createdSession.observePersistenceError { [weak self] error in
+            self?.timer.persistenceError = error
         }
         prepareConfigurationEditor()
         if relay.isConfigured {
@@ -85,8 +90,7 @@ final class ChronoSplitAppModel {
         updateActionTitles()
     }
 
-    @discardableResult
-    func applyConfiguration() -> Bool {
+    func applyConfiguration(completion: @escaping (Bool) -> Void) {
         configuration.saveError = nil
         let gameName = normalizedGameName(configuration.runDraft.gameName ?? configuration.runDraft.title)
         configuration.runDraft.gameName = gameName
@@ -96,20 +100,35 @@ final class ChronoSplitAppModel {
             data = try JSONEncoder().encode(configuration.runDraft)
         } catch {
             configuration.saveError = error.localizedDescription
-            return false
+            completion(false)
+            return
         }
-        guard let json = String(data: data, encoding: .utf8),
-              session.saveConfigurationDraftJson(content: json, createNew: editingConfigurationId == nil)
-        else {
+        guard let json = String(data: data, encoding: .utf8) else {
             configuration.saveError = String(localized: "Could not save the run configuration.")
-            return false
+            completion(false)
+            return
         }
-        shouldLoadCurrentConfiguration = false
-        editingConfigurationId = session.currentConfigurationId()
-        configuration.selectedId = editingConfigurationId ?? ""
-        reloadConfigurations()
-        loadCurrentConfiguration()
-        return true
+        session.saveConfigurationDraftJson(
+            content: json,
+            createNew: editingConfigurationId == nil
+        ) { [weak self] error in
+            guard let self else {
+                completion(false)
+                return
+            }
+            if editingConfigurationId == nil {
+                editingConfigurationId = session.currentConfigurationId()
+                configuration.runDraft.id = editingConfigurationId
+            }
+            let success = error == nil
+            if success {
+                shouldLoadCurrentConfiguration = false
+                reloadConfigurations()
+            } else {
+                configuration.saveError = error ?? String(localized: "Could not save the run configuration.")
+            }
+            completion(success)
+        }
     }
 
     func prepareConfigurationEditor(forceReload: Bool = false) {
@@ -139,19 +158,34 @@ final class ChronoSplitAppModel {
         reloadConfigurations()
     }
 
-    func startNewConfiguration() {
+    func beginConfigurationEditor(configurationId: String?) {
         shouldLoadCurrentConfiguration = false
-        editingConfigurationId = nil
-        configuration.selectedId = ""
-        configuration.runDraft = .empty
+        editingConfigurationId = configurationId
+        guard let configurationId else {
+            configuration.runDraft = .empty
+            return
+        }
+        guard let content = session.configurationDraftJson(id: configurationId),
+              let data = content.data(using: .utf8),
+              var decoded = try? JSONDecoder().decode(RunConfigurationDraft.self, from: data)
+        else {
+            configuration.saveError = String(localized: "Could not load the run configuration.")
+            return
+        }
+        if decoded.gameName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            decoded.gameName = decoded.title
+        }
+        configuration.runDraft = decoded
+    }
+
+    func discardConfigurationDraft() {
+        editingConfigurationId = session.currentConfigurationId()
+        loadCurrentConfiguration()
     }
 
     func copyConfiguration(id: String) {
         guard session.doCopyConfiguration(id: id) else { return }
-        editingConfigurationId = session.currentConfigurationId()
-        configuration.selectedId = editingConfigurationId ?? ""
         reloadConfigurations()
-        loadCurrentConfiguration()
     }
 
     func deleteConfiguration(id: String) {
@@ -163,7 +197,11 @@ final class ChronoSplitAppModel {
     }
 
     func addSegment() {
-        let number = configuration.runDraft.segments.count + 1
+        let existingIds = Set(configuration.runDraft.segments.map(\.id))
+        var number = configuration.runDraft.segments.count + 1
+        while existingIds.contains("segment-\(number)") {
+            number += 1
+        }
         configuration.runDraft.segments.append(.init(id: "segment-\(number)", name: "Segment \(number)"))
     }
 
@@ -192,10 +230,15 @@ final class ChronoSplitAppModel {
                 configuration.layoutImportError = String(localized: "The selected layout is not UTF-8 text.")
                 return
             }
-            guard session.importLayout(layoutJson: content) else {
+            guard let importedDraft = session.importedLayoutDraftJson(content: content),
+                  let data = importedDraft.data(using: .utf8),
+                  let draft = try? JSONDecoder().decode(LayoutSettingsDraft.self, from: data)
+            else {
                 configuration.layoutImportError = String(localized: "The selected file is not a supported .ls1l layout.")
                 return
             }
+            configuration.layoutDraft = draft
+            previewLayoutDraft()
             configuration.layoutImportError = nil
         } catch {
             configuration.layoutImportError = error.localizedDescription
@@ -213,16 +256,19 @@ final class ChronoSplitAppModel {
                 configuration.runImportError = String(localized: "The selected run is not UTF-8 text.")
                 return
             }
-            guard session.importRun(runXml: content) else {
-                configuration.runImportError = String(localized: "The selected file is not a supported .lss run.")
-                return
+            session.importRun(runXml: content) { [weak self] error in
+                guard let self else { return }
+                if let error {
+                    configuration.runImportError = error
+                    return
+                }
+                configuration.runImportError = nil
+                shouldLoadCurrentConfiguration = false
+                editingConfigurationId = session.currentConfigurationId()
+                configuration.selectedId = editingConfigurationId ?? ""
+                reloadConfigurations()
+                loadCurrentConfiguration()
             }
-            configuration.runImportError = nil
-            shouldLoadCurrentConfiguration = false
-            editingConfigurationId = session.currentConfigurationId()
-            configuration.selectedId = editingConfigurationId ?? ""
-            reloadConfigurations()
-            loadCurrentConfiguration()
         } catch {
             configuration.runImportError = error.localizedDescription
         }
@@ -247,23 +293,28 @@ final class ChronoSplitAppModel {
         configuration.layoutDraft = decoded
     }
 
-    @discardableResult
-    func saveLayoutDraft() -> Bool {
+    func saveLayoutDraft(completion: @escaping (Bool) -> Void) {
         configuration.saveError = nil
         let data: Data
         do {
             data = try JSONEncoder().encode(configuration.layoutDraft)
         } catch {
             configuration.saveError = error.localizedDescription
-            return false
+            completion(false)
+            return
         }
-        guard let json = String(data: data, encoding: .utf8),
-              session.saveLayoutDraftJson(content: json)
-        else {
+        guard let json = String(data: data, encoding: .utf8) else {
             configuration.saveError = String(localized: "Could not save the layout.")
-            return false
+            completion(false)
+            return
         }
-        return true
+        session.saveLayoutDraftJson(content: json) { [weak self] error in
+            let success = error == nil
+            if !success {
+                self?.configuration.saveError = error ?? String(localized: "Could not save the layout.")
+            }
+            completion(success)
+        }
     }
 
     func previewLayoutDraft(_ draft: LayoutSettingsDraft? = nil) {
@@ -282,6 +333,28 @@ final class ChronoSplitAppModel {
 
     func endRunBoardPreview() {
         session.clearRunBoardPreview()
+    }
+
+    func flushPersistence() {
+        var backgroundTask = UIBackgroundTaskIdentifier.invalid
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ChronoSplit persistence") {
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
+        session.flushPersistence { [weak self] error in
+            self?.timer.persistenceError = error
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
+    }
+
+    func clearPersistenceError() {
+        timer.persistenceError = nil
+        session.clearPersistenceError()
     }
 
     func exportedRun() -> TextExportDocument {
@@ -441,6 +514,7 @@ struct TimerAppState {
     var isRunning: Bool
     var isPaused: Bool
     var hasConfigurations: Bool
+    var persistenceError: String?
 }
 
 struct ConfigurationAppState {

@@ -56,6 +56,11 @@ class RunBoardViewModel(
 
     fun copyConfiguration(id: String): RunDefinition? = session.copyConfiguration(id)
 
+    fun updateConfiguration(
+        definition: RunDefinition,
+        preserveGoldSplits: Boolean = true,
+    ): Boolean = session.updateConfiguration(definition, preserveGoldSplits)
+
     fun importLayout(layout: LayoutDefinition) = session.importLayout(layout)
 
     fun previewLayout(layout: LayoutDefinition) {

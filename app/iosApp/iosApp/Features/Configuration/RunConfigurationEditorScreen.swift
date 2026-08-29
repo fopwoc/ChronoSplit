@@ -9,6 +9,9 @@ struct RunConfigurationEditorScreen: View {
     @State private var iconTarget: IconTarget = .run
     @State private var hasLoadedEditor = false
     @State private var isPreviewActive = false
+    @State private var invalidTimeFields: Set<String> = []
+    @State private var isSaving = false
+    @State private var didSave = false
 
     private enum IconTarget {
         case run
@@ -16,18 +19,35 @@ struct RunConfigurationEditorScreen: View {
     }
 
     private var canSave: Bool {
-        !(model.configuration.runDraft.gameName ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            model.configuration.runDraft.segments.allSatisfy {
-                !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            }
+        validationMessage == nil && !isSaving
+    }
+
+    private var validationMessage: String? {
+        let draft = model.configuration.runDraft
+        if (draft.gameName ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(localized: "Enter a game name.")
+        }
+        if draft.segments.isEmpty || draft.segments.contains(where: { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return String(localized: "Every split needs a name.")
+        }
+        if Set(draft.segments.map(\.id)).count != draft.segments.count {
+            return String(localized: "Every split must have a unique identifier.")
+        }
+        if !invalidTimeFields.isEmpty {
+            return String(localized: "Enter times as seconds, mm:ss, or hh:mm:ss.")
+        }
+        let splitTimes = draft.segments.compactMap(\.splitTimeMilliseconds)
+        if zip(splitTimes, splitTimes.dropFirst()).contains(where: { $1 < $0 }) {
+            return String(localized: "Split times cannot be earlier than the preceding split.")
+        }
+        return nil
     }
 
     var body: some View {
         Form {
             Section("Preview") {
                 SharedRunBoard(session: model.session, onSegmentClick: nil)
-                    .frame(height: 280)
+                    .frame(height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
@@ -52,6 +72,7 @@ struct RunConfigurationEditorScreen: View {
                     SegmentEditorRow(
                         segment: $segment,
                         segmentTime: segmentTime(for: segment.id),
+                        setTimeFieldValidity: setTimeFieldValidity,
                         selectIcon: {
                             iconTarget = .segment(segment.id)
                             isImportingIcon = true
@@ -60,7 +81,7 @@ struct RunConfigurationEditorScreen: View {
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         if model.configuration.runDraft.segments.count > 1 {
                             Button("Delete", systemImage: "trash", role: .destructive) {
-                                model.removeSegment(id: segment.id)
+                                removeSegment(id: segment.id)
                             }
                         }
                     }
@@ -73,6 +94,10 @@ struct RunConfigurationEditorScreen: View {
                     Spacer()
                     Text("Sum of best  \(sumOfBest)").monospacedDigit()
                 }
+            } footer: {
+                if let validationMessage {
+                    Text(validationMessage).foregroundStyle(.red)
+                }
             }
         }
         .listSectionSpacing(.compact)
@@ -81,11 +106,7 @@ struct RunConfigurationEditorScreen: View {
         .onAppear {
             guard !hasLoadedEditor else { return }
             hasLoadedEditor = true
-            if let configurationId {
-                model.selectConfiguration(configurationId)
-            } else {
-                model.startNewConfiguration()
-            }
+            model.beginConfigurationEditor(configurationId: configurationId)
             isPreviewActive = true
             model.previewRunDraft()
         }
@@ -93,7 +114,10 @@ struct RunConfigurationEditorScreen: View {
             guard isPreviewActive else { return }
             model.previewRunDraft()
         }
-        .onDisappear { model.endRunBoardPreview() }
+        .onDisappear {
+            model.endRunBoardPreview()
+            if !didSave { model.discardConfigurationDraft() }
+        }
         .fileImporter(isPresented: $isImportingIcon, allowedContentTypes: [.png, .image]) { result in
             guard case .success(let url) = result else { return }
             withSecurityAccess(url) {
@@ -107,9 +131,14 @@ struct RunConfigurationEditorScreen: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
-                    if model.applyConfiguration() {
-                        model.endRunBoardPreview()
-                        dismiss()
+                    isSaving = true
+                    model.applyConfiguration { success in
+                        isSaving = false
+                        if success {
+                            didSave = true
+                            model.endRunBoardPreview()
+                            dismiss()
+                        }
                     }
                 }
                 .disabled(!canSave)
@@ -144,11 +173,25 @@ struct RunConfigurationEditorScreen: View {
         guard values.count == segments.count else { return "—" }
         return formatMilliseconds(values.reduce(0, +))
     }
+
+    private func setTimeFieldValidity(_ id: String, _ isValid: Bool) {
+        if isValid {
+            invalidTimeFields.remove(id)
+        } else {
+            invalidTimeFields.insert(id)
+        }
+    }
+
+    private func removeSegment(id: String) {
+        invalidTimeFields = Set(invalidTimeFields.filter { !$0.hasPrefix("\(id)-") })
+        model.removeSegment(id: id)
+    }
 }
 
 private struct SegmentEditorRow: View {
     @Binding var segment: SegmentConfigurationDraft
     let segmentTime: String
+    let setTimeFieldValidity: (String, Bool) -> Void
     let selectIcon: () -> Void
 
     var body: some View {
@@ -165,34 +208,51 @@ private struct SegmentEditorRow: View {
                     .textInputAutocapitalization(.words)
             }
 
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
                 CompactTimeField(
+                    id: "\(segment.id)-split",
                     title: String(localized: "Split"),
                     placeholder: "0:00.0",
-                    milliseconds: $segment.splitTimeMilliseconds
+                    milliseconds: $segment.splitTimeMilliseconds,
+                    setValidity: setTimeFieldValidity
                 )
-                CompactTimeValue(title: String(localized: "Segment"), value: segmentTime)
                 CompactTimeField(
+                    id: "\(segment.id)-best",
                     title: String(localized: "Best"),
                     placeholder: "—",
-                    milliseconds: $segment.bestSegmentMilliseconds
+                    milliseconds: $segment.bestSegmentMilliseconds,
+                    setValidity: setTimeFieldValidity
                 )
             }
+            LabeledContent("Segment time", value: segmentTime)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 3)
     }
 }
 
 private struct CompactTimeField: View {
+    let id: String
     let title: String
     let placeholder: String
     @Binding var milliseconds: Int64?
+    let setValidity: (String, Bool) -> Void
     @State private var input: String
+    @State private var isValid = true
     @FocusState private var isFocused: Bool
 
-    init(title: String, placeholder: String, milliseconds: Binding<Int64?>) {
+    init(
+        id: String,
+        title: String,
+        placeholder: String,
+        milliseconds: Binding<Int64?>,
+        setValidity: @escaping (String, Bool) -> Void
+    ) {
+        self.id = id
         self.title = title
         self.placeholder = placeholder
+        self.setValidity = setValidity
         _milliseconds = milliseconds
         _input = State(initialValue: milliseconds.wrappedValue.map(formatMilliseconds) ?? "")
     }
@@ -206,37 +266,38 @@ private struct CompactTimeField: View {
                 .textFieldStyle(.plain)
                 .focused($isFocused)
                 .onChange(of: input) { _, value in
-                    milliseconds = value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? nil
-                        : parseMilliseconds(value)
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.isEmpty {
+                        milliseconds = nil
+                        isValid = true
+                    } else if let parsed = parseMilliseconds(trimmed) {
+                        milliseconds = parsed
+                        isValid = true
+                    } else {
+                        isValid = false
+                    }
+                    setValidity(id, isValid)
                 }
                 .onChange(of: isFocused) { _, focused in
                     guard !focused else { return }
                     input = milliseconds.map(formatMilliseconds) ?? ""
                 }
+                .onChange(of: milliseconds) { _, value in
+                    guard !isFocused else { return }
+                    input = value.map(formatMilliseconds) ?? ""
+                    isValid = true
+                    setValidity(id, true)
+                }
                 .padding(.horizontal, 8)
                 .frame(height: 34)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-private struct CompactTimeValue: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-            Text(value)
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .padding(.horizontal, 8)
-                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay {
+                    if !isValid {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(.red, lineWidth: 1)
+                    }
+                }
+                .accessibilityHint(isValid ? "" : String(localized: "Invalid time"))
         }
         .frame(maxWidth: .infinity)
     }

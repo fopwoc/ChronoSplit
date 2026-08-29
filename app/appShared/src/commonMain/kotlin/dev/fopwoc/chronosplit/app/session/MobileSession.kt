@@ -13,7 +13,7 @@ import dev.fopwoc.chronosplit.model.LayoutDefinition
 import dev.fopwoc.chronosplit.model.LssRunDocument
 import dev.fopwoc.chronosplit.model.exportLs1lLayout
 import dev.fopwoc.chronosplit.model.exportLssDocument
-import dev.fopwoc.chronosplit.storage.HistoryRepository
+import dev.fopwoc.chronosplit.storage.HistoryStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,20 +33,22 @@ import kotlin.random.Random
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MobileSession(
-    private val repository: HistoryRepository,
+    private val repository: HistoryStore,
     private val now: () -> Long,
     initialDefinition: RunDefinition = defaultDefinition(),
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var engine = RunEngine(initialDefinition)
     private var attemptId: String? = null
     private var configurationsHydrated = false
-    private var configurationSaveJob: Job? = null
+    private var persistenceJob: Job? = null
     private val mutableConfigurations = MutableStateFlow<List<RunDefinition>>(emptyList())
     private val mutableSnapshot = MutableStateFlow(engine.snapshot(now()))
+    private val mutablePersistenceError = MutableStateFlow<String?>(null)
 
     val snapshot: StateFlow<RunSnapshot> = mutableSnapshot.asStateFlow()
     val configurations: StateFlow<List<RunDefinition>> = mutableConfigurations.asStateFlow()
+    val persistenceError: StateFlow<String?> = mutablePersistenceError.asStateFlow()
     private val currentAttempts = mutableSnapshot
         .map { snapshot -> snapshot.definition.id }
         .distinctUntilChanged()
@@ -85,7 +87,10 @@ class MobileSession(
             saveConfiguration(updatedDefinition, actionTime)
             attemptId = Random.nextLong().toString(16)
         }
-        if (engine.state.status == RunStatus.FINISHED) persistAttempt(actionTime)
+        if (engine.state.status == RunStatus.FINISHED) {
+            updatePersonalBest(actionTime)
+            persistAttempt(actionTime)
+        }
         publishSnapshot(actionTime)
     }
 
@@ -101,7 +106,7 @@ class MobileSession(
     fun reset() {
         val resetTime = now()
         when (engine.state.status) {
-            RunStatus.FINISHED -> updatePersonalBest(resetTime)
+            RunStatus.FINISHED -> Unit
             RunStatus.RUNNING,
             RunStatus.PAUSED,
             -> {
@@ -149,8 +154,28 @@ class MobileSession(
             title = "${source.title} Copy",
             attemptCount = 0,
         )
-        configure(copy, preserveGoldSplits = false)
+        updateConfigurationList(copy)
+        saveWithoutChangingActiveConfiguration(copy)
         return copy
+    }
+
+    fun updateConfiguration(
+        definition: RunDefinition,
+        preserveGoldSplits: Boolean = true,
+    ): Boolean {
+        if (mutableConfigurations.value.none { it.id == definition.id }) return false
+        if (engine.definition.id == definition.id) {
+            configure(definition, preserveGoldSplits)
+        } else {
+            val updatedDefinition = if (preserveGoldSplits) {
+                preserveExistingGoldSplits(definition)
+            } else {
+                definition
+            }
+            updateConfigurationList(updatedDefinition)
+            saveWithoutChangingActiveConfiguration(updatedDefinition)
+        }
+        return true
     }
 
     fun importLayout(layout: LayoutDefinition) {
@@ -173,7 +198,7 @@ class MobileSession(
                 definition = created,
             )
         }
-        scope.launch { repository.saveAttempts(importedAttempts) }
+        enqueuePersistence { repository.saveAttempts(importedAttempts) }
         return created
     }
 
@@ -203,12 +228,14 @@ class MobileSession(
         if (mutableConfigurations.value.none { it.id == id }) return false
         val wasActive = engine.definition.id == id
         mutableConfigurations.value = mutableConfigurations.value.filterNot { it.id == id }
-        scope.launch {
+        enqueuePersistence {
             repository.deleteConfiguration(id)
             repository.deleteAttempts(id)
         }
         if (wasActive) {
-            activateConfiguration(mutableConfigurations.value.firstOrNull() ?: defaultDefinition())
+            val fallback = mutableConfigurations.value.firstOrNull() ?: defaultDefinition()
+            activateConfiguration(fallback)
+            if (mutableConfigurations.value.isNotEmpty()) saveConfiguration(fallback)
         }
         return true
     }
@@ -322,10 +349,14 @@ class MobileSession(
         definition: RunDefinition,
         timestamp: Long = now(),
     ) {
-        val previousSave = configurationSaveJob
-        configurationSaveJob = scope.launch {
-            previousSave?.join()
-            repository.saveConfiguration(definition, timestamp)
+        enqueuePersistence { repository.saveConfiguration(definition, timestamp) }
+    }
+
+    private fun saveWithoutChangingActiveConfiguration(definition: RunDefinition) {
+        val timestamp = now()
+        saveConfiguration(definition, timestamp)
+        if (definition.id != engine.definition.id) {
+            saveConfiguration(engine.definition, timestamp + 1)
         }
     }
 
@@ -350,8 +381,30 @@ class MobileSession(
             results = engine.state.results,
             elapsedMilliseconds = engine.state.results.lastOrNull()?.elapsedAtEndMilliseconds,
         )
-        scope.launch {
-            repository.saveAttempt(record)
+        enqueuePersistence { repository.saveAttempt(record) }
+    }
+
+    suspend fun awaitPendingPersistence(): String? {
+        while (true) {
+            val pending = persistenceJob ?: return mutablePersistenceError.value
+            pending.join()
+            if (pending === persistenceJob) return mutablePersistenceError.value
+        }
+    }
+
+    fun clearPersistenceError() {
+        mutablePersistenceError.value = null
+    }
+
+    private fun enqueuePersistence(block: suspend () -> Unit) {
+        val previous = persistenceJob
+        persistenceJob = scope.launch {
+            previous?.join()
+            try {
+                block()
+            } catch (failure: Throwable) {
+                mutablePersistenceError.value = failure.message ?: "Could not save ChronoSplit data."
+            }
         }
     }
 

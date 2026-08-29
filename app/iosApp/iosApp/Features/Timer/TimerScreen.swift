@@ -33,6 +33,11 @@ struct TimerScreen: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        .alert("Could not save run data", isPresented: persistenceErrorBinding) {
+            Button("OK", role: .cancel) { model.clearPersistenceError() }
+        } message: {
+            Text(model.timer.persistenceError ?? String(localized: "Unknown persistence error"))
+        }
     }
 
     private var runBoard: some View {
@@ -55,6 +60,13 @@ struct TimerScreen: View {
                     .strokeBorder(Color(uiColor: .separator).opacity(0.35), lineWidth: 0.8)
             }
             .shadow(color: .black.opacity(0.16), radius: 18, y: 10)
+    }
+
+    private var persistenceErrorBinding: Binding<Bool> {
+        Binding(
+            get: { model.timer.persistenceError != nil },
+            set: { if !$0 { model.clearPersistenceError() } }
+        )
     }
 }
 

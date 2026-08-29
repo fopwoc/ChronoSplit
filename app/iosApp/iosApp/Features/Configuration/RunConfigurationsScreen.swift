@@ -7,6 +7,7 @@ struct RunConfigurationsScreen: View {
     @State private var isImportingRun = false
     @State private var isExportingRun = false
     @State private var editorRoute: ConfigurationEditorRoute?
+    @State private var pendingDeletionId: String?
 
     var body: some View {
         List {
@@ -36,12 +37,20 @@ struct RunConfigurationsScreen: View {
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button("Delete", systemImage: "trash", role: .destructive) {
-                            model.deleteConfiguration(id: configuration.id)
+                            pendingDeletionId = configuration.id
                         }
                         Button("Copy", systemImage: "doc.on.doc") {
                             model.copyConfiguration(id: configuration.id)
                         }
                         .tint(ChronoTheme.accent)
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        if configuration.id != model.configuration.selectedId {
+                            Button("Use", systemImage: "checkmark.circle") {
+                                model.selectConfiguration(configuration.id)
+                            }
+                            .tint(ChronoTheme.mint)
+                        }
                     }
                 }
             }
@@ -56,7 +65,6 @@ struct RunConfigurationsScreen: View {
             switch result {
             case .success(let url):
                 model.importRun(from: url)
-                model.prepareConfigurationEditor(forceReload: true)
             case .failure(let error):
                 model.configuration.runImportError = error.localizedDescription
             }
@@ -72,6 +80,18 @@ struct RunConfigurationsScreen: View {
         } message: {
             Text(model.configuration.runImportError ?? String(localized: "Unknown import error"))
         }
+        .confirmationDialog(
+            "Delete this configuration and all of its run history?",
+            isPresented: deletionConfirmationBinding,
+            titleVisibility: .visible
+        ) {
+            Button("Delete configuration", role: .destructive) {
+                guard let pendingDeletionId else { return }
+                model.deleteConfiguration(id: pendingDeletionId)
+                self.pendingDeletionId = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeletionId = nil }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("New configuration", systemImage: "plus") {
@@ -85,6 +105,13 @@ struct RunConfigurationsScreen: View {
         Binding(
             get: { model.configuration.runImportError != nil },
             set: { if !$0 { model.configuration.runImportError = nil } }
+        )
+    }
+
+    private var deletionConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { pendingDeletionId != nil },
+            set: { if !$0 { pendingDeletionId = nil } }
         )
     }
 }
