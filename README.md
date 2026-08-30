@@ -1,5 +1,7 @@
 # ChronoSplit
 
+[![CI](https://github.com/fopwoc/ChronoSplit/actions/workflows/ci.yml/badge.svg)](https://github.com/fopwoc/ChronoSplit/actions/workflows/ci.yml)
+
 An iOS-first, open-source speedrun timer with LiveSplit file support, an Apple
 Watch companion, and a relay display for OBS.
 
