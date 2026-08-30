@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.setValue
+import dev.fopwoc.chronosplit.android.model.EditableSegment
 import dev.fopwoc.chronosplit.app.presentation.RunBoardViewModel
 import dev.fopwoc.chronosplit.app.session.MobileSession
 import dev.fopwoc.chronosplit.app.session.createMobileSession
@@ -280,14 +281,6 @@ class AndroidAppViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 }
-
-data class EditableSegment(
-    val id: String,
-    val name: String,
-    val iconPngBase64: String? = null,
-    val splitTime: String = "",
-    val bestSegment: String = "",
-)
 
 private fun parseEditorTime(value: String): Long? {
     val raw = value.trim()

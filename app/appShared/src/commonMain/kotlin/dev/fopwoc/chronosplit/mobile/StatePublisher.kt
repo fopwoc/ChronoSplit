@@ -97,7 +97,9 @@ class StatePublisher(
                     mutableConnectionState.value = RelayConnectionState.CONNECTED
                     retryDelayMilliseconds = InitialRetryDelayMilliseconds
 
-                    while (pendingStates.tryReceive().isSuccess) Unit
+                    while (pendingStates.tryReceive().isSuccess) {
+                        // Drain states superseded by the latest snapshot before reconnecting.
+                    }
                     snapshotMutex.withLock { latestSnapshot }?.let { snapshot ->
                         sendState(snapshot)
                     }
@@ -109,7 +111,9 @@ class StatePublisher(
                     try {
                         for (frame in incoming) {
                             if (frame is Frame.Text) {
-                                wireJson.decodeFromString<MobileServerMessage>(frame.readText())
+                                when (wireJson.decodeFromString<MobileServerMessage>(frame.readText())) {
+                                    is MobileServerMessage.StateAccepted -> Unit
+                                }
                             }
                         }
                     } finally {
@@ -181,10 +185,3 @@ class StatePublisher(
         }
     }
 }
-
-fun statePublisher(
-    baseUrl: String,
-    authToken: String,
-    sessionId: String,
-    client: HttpClient,
-): StatePublisher = StatePublisher(baseUrl, authToken, sessionId, client)

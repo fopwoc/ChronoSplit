@@ -3,8 +3,8 @@ package dev.fopwoc.chronosplit.iosapp
 import androidx.compose.ui.window.ComposeUIViewController
 import dev.fopwoc.chronosplit.app.presentation.RunBoardRoute
 import dev.fopwoc.chronosplit.app.presentation.RunBoardViewModel
-import dev.fopwoc.chronosplit.app.session.AttemptDetail
-import dev.fopwoc.chronosplit.app.session.ConfigurationSummary
+import dev.fopwoc.chronosplit.app.session.model.AttemptDetail
+import dev.fopwoc.chronosplit.app.session.model.ConfigurationSummary
 import dev.fopwoc.chronosplit.app.session.createMobileSession
 import dev.fopwoc.chronosplit.mobile.RelayConnectionState
 import dev.fopwoc.chronosplit.mobile.StatePublisher
@@ -279,19 +279,3 @@ class IosMobileSession(databasePath: String) {
         fun now(): Long = Clock.System.now().toEpochMilliseconds()
     }
 }
-
-data class IosWatchRunState(
-    val configurationId: String,
-    val configurationTitle: String,
-    val segmentName: String,
-    val segmentIndex: Int,
-    val segmentCount: Int,
-    val status: String,
-    val elapsedMilliseconds: Long,
-    val capturedAtEpochMilliseconds: Long,
-    val deltaMilliseconds: Long,
-    val hasDelta: Boolean,
-    val primaryActionTitle: String,
-    val pauseActionTitle: String,
-    val relayConnected: Boolean,
-)

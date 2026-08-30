@@ -1,8 +1,12 @@
+import dev.fopwoc.chronosplit.buildlogic.BuildIdentityResolver
+
 plugins {
     alias(libs.plugins.multiplatform)
     alias(libs.plugins.compose)
     alias(libs.plugins.composeCompiler)
 }
+
+val buildIdentity = BuildIdentityResolver.resolve(rootProject)
 
 kotlin {
     jvm()
@@ -15,17 +19,18 @@ kotlin {
             implementation(compose.desktop.currentOs)
             implementation(libs.ktorServerNetty)
             implementation(libs.coroutines)
+            runtimeOnly(libs.logback)
         }
     }
 }
 
 compose.desktop {
     application {
-        mainClass = "dev.fopwoc.chronosplit.jvmapp.MainKt"
+        mainClass = "dev.fopwoc.chronosplit.desktop.MainKt"
         nativeDistributions {
             targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg)
             packageName = "ChronoSplit"
-            packageVersion = "1.0.0"
+            packageVersion = buildIdentity.numericVersion
             macOS { bundleID = "dev.fopwoc.chronosplit.jvmapp" }
         }
     }

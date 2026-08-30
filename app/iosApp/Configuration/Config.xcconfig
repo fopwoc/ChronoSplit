@@ -3,5 +3,8 @@ TEAM_ID=
 PRODUCT_NAME=ChronoSplit
 PRODUCT_BUNDLE_IDENTIFIER=io.github.fopwoc.chronosplit.ChronoSplit$(TEAM_ID)
 
-CURRENT_PROJECT_VERSION=1
-MARKETING_VERSION=1.0
+// Gradle writes this file from the repository's shared Git-derived build identity.
+// The numeric fallback is valid for the first Xcode project load before Gradle runs.
+CURRENT_PROJECT_VERSION=0
+MARKETING_VERSION=0.0.0
+#include? "../../../build/generated/build-identity/BuildIdentity.xcconfig"

@@ -11,6 +11,7 @@ kotlin {
         namespace = "dev.fopwoc.chronosplit.shared.compose"
         compileSdk = libs.versions.androidSdk.get().toInt()
         minSdk = 26
+        withHostTest {}
     }
     jvm()
     wasmJs { browser() }
@@ -25,7 +26,7 @@ kotlin {
             implementation(libs.composeRuntime)
             implementation(libs.composeUi)
             implementation(libs.composeFoundation)
-            implementation(compose.components.resources)
+            implementation(libs.composeResources)
         }
         commonTest.dependencies {
             implementation(libs.test)

@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags: ["*.*.*"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source and tags
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify release tag and branch reachability
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Set up Temurin 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+
+      - name: Check and build release artifacts
+        run: >-
+          ./gradlew --no-daemon
+          check
+          :app:androidApp:assembleRelease
+          :app:webApp:wasmJsBrowserDistribution
+          :app:jvmApp:packageUberJarForCurrentOS
+          :backend:installBackend
+
+      - name: Package release artifacts
+        run: |
+          mkdir -p release
+          cp app/androidApp/build/outputs/apk/release/*.apk "release/chronosplit-$GITHUB_REF_NAME-android.apk"
+          cp app/jvmApp/build/compose/jars/*.jar "release/chronosplit-$GITHUB_REF_NAME-desktop-linux.jar"
+          tar -C app/webApp/build/dist/wasmJs/productionExecutable -czf "release/chronosplit-$GITHUB_REF_NAME-web.tar.gz" .
+          tar -C backend/build/install/backend -czf "release/chronosplit-$GITHUB_REF_NAME-backend.tar.gz" .
+
+      - name: Write concise release notes
+        run: |
+          previous_tag="$(git describe --tags --abbrev=0 "$GITHUB_SHA^" --match '*.*.*' 2>/dev/null || true)"
+          if [[ -n "$previous_tag" ]]; then
+            git log --format='- %s (%h)' "$previous_tag..$GITHUB_SHA" > release-notes.md
+          else
+            git log --format='- %s (%h)' "$GITHUB_SHA" > release-notes.md
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          release/*
+          --verify-tag
+          --title "$GITHUB_REF_NAME"
+          --notes-file release-notes.md
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish relay container
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/fopwoc/chronosplit:${{ github.ref_name }}
+            ghcr.io/fopwoc/chronosplit:latest

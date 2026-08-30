@@ -9,6 +9,7 @@ kotlin {
         jvmMain.dependencies {
             implementation(projects.shared.server)
             implementation(libs.ktorServerNetty)
+            runtimeOnly(libs.logback)
         }
         jvmTest.dependencies {
             implementation(libs.test)

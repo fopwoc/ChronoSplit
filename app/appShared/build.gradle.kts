@@ -9,10 +9,15 @@ plugins {
 }
 
 kotlin {
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
+    }
+
     android {
         namespace = "dev.fopwoc.chronosplit.app.shared"
         compileSdk = libs.versions.androidSdk.get().toInt()
         minSdk = 26
+        withHostTest {}
     }
     iosArm64()
     iosSimulatorArm64()

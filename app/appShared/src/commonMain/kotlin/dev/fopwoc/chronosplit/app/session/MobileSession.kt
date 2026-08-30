@@ -1,5 +1,8 @@
 package dev.fopwoc.chronosplit.app.session
 
+import dev.fopwoc.chronosplit.app.session.model.AttemptDetail
+import dev.fopwoc.chronosplit.app.session.model.AttemptSegmentDetail
+import dev.fopwoc.chronosplit.app.session.model.AttemptSummary
 import dev.fopwoc.chronosplit.domain.RunEngine
 import dev.fopwoc.chronosplit.model.AttemptRecord
 import dev.fopwoc.chronosplit.model.RunDefinition
@@ -420,44 +423,3 @@ class MobileSession(
         )
     }
 }
-
-data class AttemptSummary(
-    val id: String,
-    val runId: String,
-    val runTitle: String,
-    val startedAtEpochMilliseconds: Long,
-    val completed: Boolean,
-    val completedSegmentCount: Int,
-    val elapsedMilliseconds: Long?,
-)
-
-data class ConfigurationSummary(
-    val id: String,
-    val title: String,
-    val segmentCount: Int,
-    val gameName: String? = null,
-    val categoryName: String? = null,
-    val iconPngBase64: String? = null,
-)
-
-data class AttemptDetail(
-    val id: String,
-    val runId: String,
-    val runTitle: String,
-    val gameName: String?,
-    val categoryName: String?,
-    val startedAtEpochMilliseconds: Long,
-    val completedAtEpochMilliseconds: Long?,
-    val elapsedMilliseconds: Long?,
-    val segments: List<AttemptSegmentDetail>,
-)
-
-data class AttemptSegmentDetail(
-    val id: String,
-    val title: String,
-    val segmentDurationMilliseconds: Long?,
-    val elapsedAtEndMilliseconds: Long?,
-    val isBestSegment: Boolean,
-    val bestSegmentDeltaMilliseconds: Long?,
-    val comparisonDeltaMilliseconds: Long?,
-)

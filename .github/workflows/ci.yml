@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - LICENSE
+      - COPYRIGHT
+      - ".github/assets/**"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - LICENSE
+      - COPYRIGHT
+      - ".github/assets/**"
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  multiplatform:
+    name: Android, JVM, and web
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Temurin 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+
+      - name: Check and build distributions
+        run: >-
+          ./gradlew --no-daemon
+          check
+          :app:androidApp:assembleDebug
+          :app:webApp:wasmJsBrowserDistribution
+          :app:jvmApp:packageUberJarForCurrentOS
+          :backend:installBackend
+
+      - name: Validate Docker Compose
+        run: docker compose config --quiet
+
+      - name: Upload Android application
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-debug
+          path: app/androidApp/build/outputs/apk/debug/*.apk
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload web display
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-display
+          path: app/webApp/build/dist/wasmJs/productionExecutable/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload desktop relay
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-relay-linux
+          path: app/jvmApp/build/compose/jars/*.jar
+          retention-days: 7
+          if-no-files-found: error
+
+  apple:
+    name: iPhone and Apple Watch
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Temurin 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+
+      - name: Test shared iOS code and build Kotlin framework
+        run: >-
+          ./gradlew --no-daemon
+          :shared:models:iosSimulatorArm64Test
+          :app:appShared:iosSimulatorArm64Test
+          :app:iosApp:linkDebugFrameworkIosSimulatorArm64
+
+      - name: Build iPhone app and embedded watch app
+        run: |
+          xcodebuild \
+            -project app/iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ChronoSplitDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES \
+            FRAMEWORK_SEARCH_PATHS="$GITHUB_WORKSPACE/app/iosApp/build/bin/iosSimulatorArm64/debugFramework" \
+            ONLY_ACTIVE_ARCH=YES \
+            ARCHS=arm64 \
+            build

@@ -13,6 +13,7 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.server.application.install
+import io.ktor.server.application.log
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
@@ -48,6 +49,8 @@ fun Application.relayModule(
     store: RelayStore = RelayStore(),
     mobileAuthToken: String = DefaultMobileAuthToken,
 ) {
+    val logger = log
+    logger.info("Initializing relay protocol and routes")
     install(ContentNegotiation) { json(wireJson) }
     install(WebSockets) {
         pingPeriod = MobileWebSocketPingPeriodSeconds.seconds
@@ -61,21 +64,27 @@ fun Application.relayModule(
         val clientAuthToken = call.request.headers[MobileAuthHeader].orEmpty()
         when {
             sessionId.isNullOrBlank() -> {
+                logger.warn("Rejected mobile connection without a session identifier")
                 call.respond(HttpStatusCode.BadRequest, "Mobile session header is required")
                 finish()
             }
 
             !authMatches(clientAuthToken, mobileAuthToken) -> {
+                logger.warn("Rejected mobile connection with invalid authentication")
                 call.respond(HttpStatusCode.Unauthorized, "Invalid mobile auth token")
                 finish()
             }
 
             !store.tryClaimMobileSession(sessionId) -> {
+                logger.warn("Rejected mobile connection because another session is active")
                 call.respond(HttpStatusCode.Conflict, "Another mobile session is connected")
                 finish()
             }
 
-            else -> call.attributes.put(mobileHandshakeKey, MobileHandshake(sessionId))
+            else -> {
+                logger.debug("Mobile session connected: {}", sessionId)
+                call.attributes.put(mobileHandshakeKey, MobileHandshake(sessionId))
+            }
         }
     }
 
@@ -109,6 +118,11 @@ fun Application.relayModule(
                         is MobileClientMessage.State -> {
                             if (message.message.protocolVersion != 1) return@webSocket
                             store.publish(message.message)
+                            logger.debug(
+                                "Accepted relay state revision {} from session {}",
+                                message.message.snapshot.state.revision,
+                                handshake.sessionId,
+                            )
                             send(
                                 Frame.Text(
                                     wireJson.encodeToString<MobileServerMessage>(
@@ -123,9 +137,11 @@ fun Application.relayModule(
                 }
             } finally {
                 store.releaseMobileSession(handshake.sessionId)
+                logger.debug("Mobile session disconnected: {}", handshake.sessionId)
             }
         }
     }
+    logger.info("Relay protocol and routes are ready")
 }
 
 private fun io.ktor.server.application.ApplicationCall.isWebSocketUpgrade(): Boolean =

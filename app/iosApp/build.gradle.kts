@@ -23,3 +23,9 @@ kotlin {
         }
     }
 }
+
+tasks.matching { task ->
+    task.name.startsWith("link") || task.name == "embedAndSignAppleFrameworkForXcode"
+}.configureEach {
+    dependsOn(rootProject.tasks.named("generateBuildIdentity"))
+}

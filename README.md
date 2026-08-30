@@ -10,6 +10,9 @@ from your phone.
 
 ![ChronoSplit running on iOS](.github/assets/ios.jpg)
 
+> [!NOTE]
+> This project contains AI-generated code. See [AI_USAGE.md](AI_USAGE.md) for details.
+
 ## Features
 
 - Start, split, pause, resume, and reset runs from iPhone or Android.
@@ -60,7 +63,7 @@ The local relay accepts an unauthenticated mobile connection by default. Set a
 token when the relay is reachable by other devices:
 
 ```bash
-CHRONOSPLIT_MOBILE_AUTH_TOKEN='choose-a-long-random-token' docker compose up --build
+MOBILE_AUTH_TOKEN='choose-a-long-random-token' docker compose up --build
 ```
 
 Enter the same value in the mobile app's **Integration** screen. The browser
@@ -78,7 +81,7 @@ compatible with the Android SDK image transform used by this build.
 
 ### Android
 
-Install Android SDK 36, then build the debug APK:
+Install Android SDK 37, then build the debug APK:
 
 ```bash
 ./gradlew :app:androidApp:assembleDebug
@@ -105,7 +108,7 @@ Run the macOS desktop display and its embedded relay:
 ```
 
 It listens on port `8080` by default. Override the port or mobile token with the
-`PORT` and `MOBILE_AUTH_TOKEN` environment variables.
+`HTTP_PORT` and `MOBILE_AUTH_TOKEN` environment variables.
 
 ### Web relay without Docker
 
@@ -138,3 +141,8 @@ The web display is available at `http://localhost:8080`.
 | `shared/models` | Run, layout, history, and relay protocol models |
 | `shared/compose` | Shared timer board and remote-display UI |
 | `shared/server` | Ktor relay routes and in-memory state fan-out |
+
+## License
+
+ChronoSplit is licensed under [WTFNMFPL](LICENSE). See
+[THIRD_PARTY.md](THIRD_PARTY.md) for interoperability and provenance notes.

@@ -11,19 +11,25 @@ import dev.fopwoc.chronosplit.server.RelayStore
 import dev.fopwoc.chronosplit.server.relayModule
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import org.slf4j.LoggerFactory
+
+private val logger = LoggerFactory.getLogger("dev.fopwoc.chronosplit.desktop.Application")
 
 fun main() {
+    logger.info("Starting desktop relay")
     val store = RelayStore()
-    val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
+    val port = System.getenv("HTTP_PORT")?.toIntOrNull() ?: 8080
     val mobileAuthToken = System.getenv("MOBILE_AUTH_TOKEN").orEmpty()
     val server = embeddedServer(Netty, host = "0.0.0.0", port = port) {
         relayModule(store, mobileAuthToken)
     }
         .start(wait = false)
+    logger.info("Desktop relay is ready on port {}", port)
 
     application {
         Window(
             onCloseRequest = {
+                logger.info("Stopping desktop relay")
                 server.stop(gracePeriodMillis = 500, timeoutMillis = 1_500)
                 exitApplication()
             },

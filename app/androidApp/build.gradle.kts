@@ -1,8 +1,12 @@
+import dev.fopwoc.chronosplit.buildlogic.BuildIdentityResolver
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.serialization)
     alias(libs.plugins.composeCompiler)
 }
+
+val buildIdentity = BuildIdentityResolver.resolve(rootProject)
 
 android {
     namespace = "dev.fopwoc.chronosplit.android"
@@ -10,10 +14,10 @@ android {
 
     defaultConfig {
         applicationId = "dev.fopwoc.chronosplit.android"
-        minSdk = 26
+        minSdk = 35
         targetSdk = libs.versions.androidSdk.get().toInt()
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildIdentity.buildNumber
+        versionName = buildIdentity.version
     }
 
     buildFeatures {

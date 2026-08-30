@@ -1,6 +1,7 @@
-.git
 .gradle
 .idea
 **/build
 **/xcuserdata
 node_modules
+local.properties
+.DS_Store
